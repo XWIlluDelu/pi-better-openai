@@ -88,6 +88,7 @@ function createHarness(cwd: string): Harness {
     registerMessageRenderer: vi.fn(),
     registerShortcut: vi.fn(),
     sendMessage: vi.fn(),
+    appendEntry: vi.fn(),
     getFlag: vi.fn(() => false),
     getThinkingLevel: vi.fn(() => "off"),
   } as unknown as ExtensionAPI;
@@ -106,6 +107,7 @@ function createHarness(cwd: string): Harness {
       setWidget,
     },
     sessionManager: {
+      getBranch: vi.fn(() => []),
       getEntries,
       getLeafId,
       getCwd: vi.fn(() => cwd),

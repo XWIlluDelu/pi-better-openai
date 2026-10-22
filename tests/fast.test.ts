@@ -61,6 +61,7 @@ function createModel(provider: string, id: string) {
 function createHarness(cwd: string, model = createModel("openai", "gpt-5.5")): Harness {
   const handlers = new Map<string, EventHandler[]>();
   const commands = new Map<string, { handler: CommandHandler }>();
+  const entries: { type: "custom"; customType: string; data: unknown }[] = [];
 
   const pi = {
     on(event: string, handler: EventHandler) {
@@ -77,6 +78,9 @@ function createHarness(cwd: string, model = createModel("openai", "gpt-5.5")): H
     registerMessageRenderer: vi.fn(),
     registerShortcut: vi.fn(),
     sendMessage: vi.fn(),
+    appendEntry: vi.fn((customType: string, data: unknown) => {
+      entries.push({ type: "custom", customType, data });
+    }),
     getFlag: vi.fn(() => false),
     getThinkingLevel: vi.fn(() => "off"),
   } as unknown as ExtensionAPI;
@@ -93,6 +97,7 @@ function createHarness(cwd: string, model = createModel("openai", "gpt-5.5")): H
     },
     sessionManager: {
       getEntries: vi.fn(() => []),
+      getBranch: vi.fn(() => [...entries]),
       getCwd: vi.fn(() => cwd),
       getSessionName: vi.fn(() => undefined),
     },
@@ -185,10 +190,13 @@ describe("service tiers", () => {
     expect(payload.service_tier).toBe("priority");
     expect(h.ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("6x Standard"), "warning");
     expect(readRawConfig(configPaths(cwd).project)).toMatchObject({
-      serviceTier: "ultrafast",
+      serviceTier: "standard",
       unknown: "keep",
     });
     const resumed = createHarness(cwd, h.ctx.model);
+    vi.mocked(resumed.ctx.sessionManager.getBranch).mockImplementation(() =>
+      h.ctx.sessionManager.getBranch(),
+    );
     await emit(resumed, "session_start");
     expect(await beforeProviderRequest(resumed, payload)).toMatchObject({
       service_tier: "ultrafast",
@@ -260,7 +268,7 @@ describe("service tiers", () => {
     expect(await beforeProviderRequest(h, { model: "gpt-6-astra" })).toMatchObject({
       service_tier: "priority",
     });
-    expect(readRawConfig(configPaths(cwd).project).serviceTier).toBe("fast");
+    expect(h.pi.appendEntry).toHaveBeenCalledWith("pi-better-openai:service-tier", "fast");
   });
 
   test("nonpersistent selection stays session-only and the Fast flag never selects Ultrafast", async () => {

@@ -185,6 +185,7 @@ const OPENAI_RESETS_COMMAND = "openai-resets";
 const FLAG = "fast";
 const PET_EMPTY_VALUE = "not selected";
 const SERVICE_TIER = "priority";
+const SERVICE_TIER_ENTRY = "pi-better-openai:service-tier";
 type SettingsPickerItem = {
   id: string;
   label: string;
@@ -345,20 +346,20 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     return cachedConfig ?? refresh(ctx);
   }
 
-  function persist(nextConfig: ResolvedConfig): void {
-    cachedConfig = {
-      ...nextConfig,
-      active: fastController.active,
-      desiredActive: fastController.desiredActive,
-      serviceTier: fastController.desiredTier,
-    };
-    if (!nextConfig.persistState) return;
-    writeConfig(nextConfig.configPath, {
-      ...readRawConfig(nextConfig.configPath),
-      active: fastController.active,
-      desiredActive: fastController.desiredActive,
-      serviceTier: fastController.desiredTier,
-    });
+  function persist(cfg: ResolvedConfig): void {
+    if (cfg.persistState) pi.appendEntry(SERVICE_TIER_ENTRY, fastController.desiredTier);
+  }
+
+  function restoreTier(ctx: ExtensionContext, cfg: ResolvedConfig, flagActive = false): void {
+    fastController.initializeForSession(ctx, cfg, flagActive);
+    if (!cfg.persistState || flagActive) return;
+    const entry = ctx.sessionManager
+      .getBranch()
+      .reverse()
+      .find((entry) => entry.type === "custom" && entry.customType === SERVICE_TIER_ENTRY);
+    if (entry?.type === "custom" && isServiceTier(entry.data)) {
+      fastController.setTier(ctx, cfg, entry.data);
+    }
   }
 
   function writePetConfig(ctx: ExtensionContext, patch: Record<string, unknown>): ResolvedConfig {
@@ -1077,17 +1078,19 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     const cfg = refresh(ctx);
     const current = readRawConfig(cfg.configPath);
     const bool = rawValue === "true";
-    if (id === "fast.enabled") {
-      fastController.setDesired(ctx, cfg, bool);
-    } else if (id === "serviceTier") {
+    if (id === "fast.enabled") return setActive(ctx, bool);
+    if (id === "serviceTier") {
       if (!isServiceTier(rawValue)) return;
       fastController.setTier(ctx, cfg, rawValue);
+      persist(cfg);
+      updateFooter(ctx);
       ctx.ui.notify(
         fastController.stateText(ctx, cfg),
         rawValue === "ultrafast" || (fastController.desiredActive && !fastController.active)
           ? "warning"
           : "info",
       );
+      return;
     }
     const petKey = id.startsWith("pets.") ? id.slice("pets.".length) : undefined;
     const nextRawConfig = applySettingToRawConfig(current, id, rawValue, {
@@ -1097,11 +1100,6 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
       serviceTier: fastController.desiredTier,
       petEmptyValue: PET_EMPTY_VALUE,
     });
-    if (id === "persistState" && bool) {
-      nextRawConfig.serviceTier = fastController.desiredTier;
-      nextRawConfig.active = fastController.active;
-      nextRawConfig.desiredActive = fastController.desiredActive;
-    }
     if (petKey) {
       if (petKey === "enabled" || petKey === "sizeCells" || petKey === "slug")
         petController.invalidateLoadKey();
@@ -1112,6 +1110,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     }
     writeConfig(cfg.configPath, nextRawConfig);
     const next = refresh(ctx);
+    if (id === "persistState" && bool) persist(next);
     if (id === "pets.enabled" || id === "pets.sizeCells" || id === "pets.slug")
       void petController.refresh(ctx, next);
     if (id.startsWith("usage.")) {
@@ -1544,14 +1543,9 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     invalidateSessionName();
     multiproviderRefreshCtx = ctx;
     const nextConfig = refresh(ctx);
-    fastController.initializeForSession(ctx, nextConfig, pi.getFlag(FLAG) === true);
-    if (
-      fastController.desiredActive !== nextConfig.desiredActive ||
-      fastController.active !== nextConfig.active ||
-      fastController.desiredTier !==
-        (nextConfig.serviceTier ?? (nextConfig.desiredActive ? "fast" : "standard"))
-    )
-      persist(nextConfig);
+    const flagActive = pi.getFlag(FLAG) === true;
+    restoreTier(ctx, nextConfig, flagActive);
+    if (flagActive) persist(nextConfig);
     if (hasTerminalUI(ctx)) petController.installResizeGuard(ctx);
     refreshFooterTotals(ctx);
     updateFooter(ctx);
@@ -1606,6 +1600,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   });
 
   pi.on("session_tree", (_event, ctx) => {
+    restoreTier(ctx, refresh(ctx));
     invalidateContextUsage();
     refreshFooterTotals(ctx);
     petController.queueKittyCleanup();
@@ -1619,7 +1614,6 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     const wasActive = fastController.active;
     fastController.applyDesiredState(ctx, cfg);
     if (fastController.active !== wasActive) {
-      persist(cfg);
       if (cfg.notifyOnModelSwitch) {
         ctx.ui.notify(
           fastController.active

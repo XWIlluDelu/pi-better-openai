@@ -322,7 +322,7 @@ export const FAST_SETTING_DESCRIPTORS: readonly SettingsOptionDescriptor[] = [
     label: "Persist service tier",
     currentValue: (cfg) => String(cfg.persistState),
     values: ["true", "false"],
-    description: "Remember the selected service tier across sessions.",
+    description: "Remember the selected service tier in this session and restore it on resume.",
     parse: booleanSetting,
   },
   {
