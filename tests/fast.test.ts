@@ -96,8 +96,7 @@ function createHarness(cwd: string, model = createModel("openai", "gpt-5.5")): H
       setStatus: vi.fn(),
     },
     sessionManager: {
-      getEntries: vi.fn(() => []),
-      getBranch: vi.fn(() => [...entries]),
+      getEntries: vi.fn(() => [...entries]),
       getCwd: vi.fn(() => cwd),
       getSessionName: vi.fn(() => undefined),
     },
@@ -198,8 +197,8 @@ describe("service tiers", () => {
       unknown: "keep",
     });
     const resumed = createHarness(cwd, h.ctx.model);
-    vi.mocked(resumed.ctx.sessionManager.getBranch).mockImplementation(() =>
-      h.ctx.sessionManager.getBranch(),
+    vi.mocked(resumed.ctx.sessionManager.getEntries).mockImplementation(() =>
+      h.ctx.sessionManager.getEntries(),
     );
     await emit(resumed, "session_start");
     expect(await beforeProviderRequest(resumed, payload)).toMatchObject({

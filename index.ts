@@ -354,7 +354,7 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     fastController.initializeForSession(ctx, cfg, flagActive);
     if (!cfg.persistState || flagActive) return;
     const entry = ctx.sessionManager
-      .getBranch()
+      .getEntries()
       .reverse()
       .find((entry) => entry.type === "custom" && entry.customType === SERVICE_TIER_ENTRY);
     if (entry?.type === "custom" && isServiceTier(entry.data)) {
@@ -1615,8 +1615,6 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   });
 
   pi.on("session_tree", (_event, ctx) => {
-    const cfg = refresh(ctx);
-    if (cfg.persistState) restoreTier(ctx, cfg);
     invalidateContextUsage();
     refreshFooterTotals(ctx);
     petController.queueKittyCleanup();
