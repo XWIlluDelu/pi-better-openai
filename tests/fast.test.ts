@@ -112,7 +112,11 @@ function createHarness(cwd: string, model = createModel("openai", "gpt-5.5")): H
   return { pi, ctx, handlers, commands };
 }
 
-async function emit(harness: Harness, event: string, payload: unknown = {}): Promise<unknown[]> {
+async function emit(
+  harness: Harness,
+  event: string,
+  payload: unknown = event === "session_start" ? { reason: "startup" } : {},
+): Promise<unknown[]> {
   const results: unknown[] = [];
   const handlers = harness.handlers.get(event) ?? [];
   for (const handler of handlers) {

@@ -1553,12 +1553,12 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     setStatusWidget(ctx, statusWidgetParts(fast, usage));
   }
 
-  pi.on("session_start", (_event, ctx) => {
+  pi.on("session_start", (event, ctx) => {
     invalidateContextUsage();
     invalidateSessionName();
     multiproviderRefreshCtx = ctx;
     const nextConfig = refresh(ctx);
-    const flagActive = pi.getFlag(FLAG) === true;
+    const flagActive = event.reason === "startup" && pi.getFlag(FLAG) === true;
     restoreTier(ctx, nextConfig, flagActive);
     if (flagActive) persist(nextConfig);
     if (hasTerminalUI(ctx)) petController.installResizeGuard(ctx);
@@ -1615,7 +1615,8 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
   });
 
   pi.on("session_tree", (_event, ctx) => {
-    restoreTier(ctx, refresh(ctx));
+    const cfg = refresh(ctx);
+    if (cfg.persistState) restoreTier(ctx, cfg);
     invalidateContextUsage();
     refreshFooterTotals(ctx);
     petController.queueKittyCleanup();
