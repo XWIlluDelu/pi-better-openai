@@ -345,6 +345,33 @@ describe("footer mode ownership", () => {
     expect(harness.setFooter).not.toHaveBeenCalled();
   });
 
+  test("RPC tier state follows the controller with the footer and persistence disabled", async () => {
+    const cwd = createTempProject();
+    writeProjectConfig(cwd, "off", { supportedModels: ["openai/gpt-5.5"] });
+    const harness = createHarness(cwd);
+    Object.assign(harness.ctx, {
+      mode: "rpc",
+      model: { provider: "openai", id: "gpt-5.5", api: "openai-responses" },
+    });
+    const state = () =>
+      JSON.parse(
+        harness.setStatus.mock.calls
+          .filter(([key]) => key === "better-openai:service-tier")
+          .at(-1)?.[1],
+      );
+    await emit(harness, "session_start");
+    expect(state()).toMatchObject({ tier: "standard", active: false, supported: { fast: true } });
+    await harness.commands.get("openai-tier")?.("fast", harness.ctx);
+    expect(state()).toMatchObject({ tier: "fast", active: true });
+    Object.assign(harness.ctx, { model: { provider: "other", id: "unsupported", api: "other" } });
+    await emit(harness, "model_select", { model: harness.ctx.model });
+    expect(state()).toMatchObject({
+      tier: "fast",
+      active: false,
+      supported: { standard: false, fast: false, ultrafast: false },
+    });
+  });
+
   test("does not open the custom settings component in RPC mode", async () => {
     const cwd = createTempProject();
     const harness = createHarness(cwd);

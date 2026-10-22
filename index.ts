@@ -96,7 +96,7 @@ import {
   registerOpenAIPets,
   _petsTest,
 } from "./src/pets.ts";
-import { FastController, supportsFast } from "./src/fast-controller.ts";
+import { FastController, supportsFast, supportsServiceTier } from "./src/fast-controller.ts";
 import { isOpenAISubscriptionModel, UsageController } from "./src/usage-controller.ts";
 import { PetFooterController } from "./src/pet-footer-controller.ts";
 import {
@@ -1503,6 +1503,21 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
 
   function updateFooter(ctx: ExtensionContext): void {
     const cfg = config(ctx);
+    if (ctx.mode === "rpc") {
+      ctx.ui.setStatus(
+        "better-openai:service-tier",
+        JSON.stringify({
+          tier: fastController.desiredTier,
+          active: fastController.active,
+          supported: Object.fromEntries(
+            (["standard", "fast", "ultrafast"] as const).map((tier) => [
+              tier,
+              supportsServiceTier(ctx, cfg, tier),
+            ]),
+          ),
+        }),
+      );
+    }
 
     if (!hasTerminalUI(ctx)) {
       if (cfg.footer.mode === "off") {
