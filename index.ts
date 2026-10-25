@@ -19,6 +19,7 @@ import {
 import type { Usage } from "@earendil-works/pi-ai";
 import { registerOpenAICodexModels } from "./src/codex-models.ts";
 import { registerOpenAIDecisionsProvider } from "./src/openai-decisions.ts";
+import { openAITierArgumentCompletions } from "./src/command-completions.ts";
 import { CONFIG_BASENAME, STATUS_KEY } from "./src/identity.ts";
 import {
   CODEX_PROVIDER_ID,
@@ -178,11 +179,9 @@ class DynamicBorder {
   }
 }
 
-const COMMAND = "fast";
 const OPENAI_STATUS_COMMAND = "openai-usage";
 const OPENAI_SETTINGS_COMMAND = "openai-settings";
 const OPENAI_RESETS_COMMAND = "openai-resets";
-const FLAG = "fast";
 const PET_EMPTY_VALUE = "not selected";
 const SERVICE_TIER = "priority";
 const SERVICE_TIER_ENTRY = "pi-better-openai:service-tier";
@@ -350,9 +349,10 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     if (cfg.persistState) pi.appendEntry(SERVICE_TIER_ENTRY, fastController.desiredTier);
   }
 
-  function restoreTier(ctx: ExtensionContext, cfg: ResolvedConfig, flagActive = false): void {
-    fastController.initializeForSession(ctx, cfg, flagActive);
-    if (!cfg.persistState || flagActive) return;
+  function restoreTier(ctx: ExtensionContext, cfg: ResolvedConfig): void {
+    fastController.initializeForSession(ctx, cfg);
+    if (!cfg.persistState) return;
+    // Tier is session-wide, not tied to the currently viewed history branch.
     const entry = ctx.sessionManager
       .getEntries()
       .reverse()
@@ -369,18 +369,6 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     writeConfig(cfg.configPath, { ...current, pets: { ...pets, ...patch } });
     petController.invalidateLoadKey();
     return refresh(ctx);
-  }
-
-  function setActive(ctx: ExtensionContext, next: boolean): void {
-    const nextConfig = refresh(ctx);
-    fastController.setDesired(ctx, nextConfig, next);
-    persist(nextConfig);
-    updateFooter(ctx);
-    if (next && !fastController.active) {
-      ctx.ui.notify(fastController.unsupportedRequestMessage(ctx, nextConfig), "warning");
-      return;
-    }
-    ctx.ui.notify(fastController.stateText(ctx, nextConfig), "info");
   }
 
   function addFooterUsage(usage: Usage | undefined): void {
@@ -436,12 +424,6 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     cachedSessionNameLeafId = undefined;
     cachedSessionName = undefined;
   }
-
-  pi.registerFlag(FLAG, {
-    description: "Start with OpenAI fast mode enabled (service_tier=priority)",
-    type: "boolean",
-    default: false,
-  });
 
   function formatDebugStatus(ctx: ExtensionContext): string {
     const cfg = config(ctx);
@@ -547,17 +529,9 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     }
   }
 
-  pi.registerCommand(COMMAND, {
-    description: "Toggle OpenAI fast mode",
-    handler: async (args, ctx) => {
-      const arg = args.trim().toLowerCase();
-      if (!arg) return setActive(ctx, !fastController.desiredActive);
-      ctx.ui.notify("Usage: /fast", "error");
-    },
-  });
-
   pi.registerCommand("openai-tier", {
-    description: "Select standard, fast, or ultrafast (API Astra; 6x Standard token prices)",
+    description: "Select standard, fast, or ultrafast (API Astra/Sol; 6x Standard token prices)",
+    getArgumentCompletions: openAITierArgumentCompletions,
     handler: async (args, ctx) => {
       const tier = args.trim().toLowerCase();
       if (!tier) {
@@ -1078,7 +1052,6 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     const cfg = refresh(ctx);
     const current = readRawConfig(cfg.configPath);
     const bool = rawValue === "true";
-    if (id === "fast.enabled") return setActive(ctx, bool);
     if (id === "serviceTier") {
       if (!isServiceTier(rawValue)) return;
       fastController.setTier(ctx, cfg, rawValue);
@@ -1553,14 +1526,12 @@ export default function betterOpenAI(pi: ExtensionAPI): void {
     setStatusWidget(ctx, statusWidgetParts(fast, usage));
   }
 
-  pi.on("session_start", (event, ctx) => {
+  pi.on("session_start", (_event, ctx) => {
     invalidateContextUsage();
     invalidateSessionName();
     multiproviderRefreshCtx = ctx;
     const nextConfig = refresh(ctx);
-    const flagActive = event.reason === "startup" && pi.getFlag(FLAG) === true;
-    restoreTier(ctx, nextConfig, flagActive);
-    if (flagActive) persist(nextConfig);
+    restoreTier(ctx, nextConfig);
     if (hasTerminalUI(ctx)) petController.installResizeGuard(ctx);
     refreshFooterTotals(ctx);
     updateFooter(ctx);

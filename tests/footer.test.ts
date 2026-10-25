@@ -360,7 +360,11 @@ describe("footer mode ownership", () => {
           .at(-1)?.[1],
       );
     await emit(harness, "session_start");
-    expect(state()).toMatchObject({ tier: "standard", active: false, supported: { fast: true } });
+    expect(state()).toEqual({
+      tier: "standard",
+      active: false,
+      supported: { standard: true, fast: true, ultrafast: false },
+    });
     await harness.commands.get("openai-tier")?.("fast", harness.ctx);
     expect(state()).toMatchObject({ tier: "fast", active: true });
     Object.assign(harness.ctx, { model: { provider: "other", id: "unsupported", api: "other" } });
