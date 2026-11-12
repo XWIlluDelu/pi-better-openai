@@ -61,6 +61,7 @@ function createModel(provider: string, id: string) {
 function createHarness(cwd: string, model = createModel("openai", "gpt-5.5")): Harness {
   const handlers = new Map<string, EventHandler[]>();
   const commands = new Map<string, { handler: CommandHandler }>();
+  const entries: { type: "custom"; customType: string; data: unknown }[] = [];
 
   const pi = {
     on(event: string, handler: EventHandler) {
@@ -77,6 +78,9 @@ function createHarness(cwd: string, model = createModel("openai", "gpt-5.5")): H
     registerMessageRenderer: vi.fn(),
     registerShortcut: vi.fn(),
     sendMessage: vi.fn(),
+    appendEntry: vi.fn((customType: string, data: unknown) => {
+      entries.push({ type: "custom", customType, data });
+    }),
     getFlag: vi.fn(() => false),
     getThinkingLevel: vi.fn(() => "off"),
   } as unknown as ExtensionAPI;
@@ -92,7 +96,7 @@ function createHarness(cwd: string, model = createModel("openai", "gpt-5.5")): H
       setStatus: vi.fn(),
     },
     sessionManager: {
-      getEntries: vi.fn(() => []),
+      getEntries: vi.fn(() => [...entries]),
       getCwd: vi.fn(() => cwd),
       getSessionName: vi.fn(() => undefined),
     },
@@ -107,7 +111,11 @@ function createHarness(cwd: string, model = createModel("openai", "gpt-5.5")): H
   return { pi, ctx, handlers, commands };
 }
 
-async function emit(harness: Harness, event: string, payload: unknown = {}): Promise<unknown[]> {
+async function emit(
+  harness: Harness,
+  event: string,
+  payload: unknown = event === "session_start" ? { reason: "startup" } : {},
+): Promise<unknown[]> {
   const results: unknown[] = [];
   const handlers = harness.handlers.get(event) ?? [];
   for (const handler of handlers) {
@@ -207,10 +215,13 @@ describe("service tiers", () => {
     expect(payload.service_tier).toBe("priority");
     expect(h.ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("6x Standard"), "warning");
     expect(readRawConfig(configPaths(cwd).project)).toMatchObject({
-      serviceTier: "ultrafast",
+      serviceTier: "standard",
       unknown: "keep",
     });
     const resumed = createHarness(cwd, h.ctx.model);
+    vi.mocked(resumed.ctx.sessionManager.getEntries).mockImplementation(() =>
+      h.ctx.sessionManager.getEntries(),
+    );
     await emit(resumed, "session_start");
     expect(await beforeProviderRequest(resumed, payload)).toMatchObject({
       service_tier: "ultrafast",
@@ -221,6 +232,48 @@ describe("service tiers", () => {
       serviceTier: "standard",
       desiredActive: false,
     });
+  });
+
+  test("restores the latest session-wide choice on reload without changing another session's default", async () => {
+    const cwd = createTempProject();
+    writeProjectConfig(cwd, { serviceTier: "standard", unknown: "keep" });
+    const h = createHarness(cwd);
+    await emit(h, "session_start");
+    await h.commands.get("openai-tier")!.handler("fast", h.ctx);
+    await emit(h, "session_tree", { newLeafId: "earlier-branch" });
+    expect(await beforeProviderRequest(h, { model: "gpt-5.5" })).toMatchObject({
+      service_tier: "priority",
+    });
+
+    const reloaded = createHarness(cwd);
+    vi.mocked(reloaded.ctx.sessionManager.getEntries).mockImplementation(() =>
+      h.ctx.sessionManager.getEntries(),
+    );
+    await emit(reloaded, "session_start", { reason: "reload" });
+    expect(await beforeProviderRequest(reloaded, { model: "gpt-5.5" })).toMatchObject({
+      service_tier: "priority",
+    });
+    // Restoration and capability changes must not manufacture new selections.
+    reloaded.ctx.model = createModel("other", "unsupported");
+    await emit(reloaded, "model_select", { model: reloaded.ctx.model });
+    expect(reloaded.pi.appendEntry).not.toHaveBeenCalled();
+
+    await h.commands.get("openai-tier")!.handler("standard", h.ctx);
+    reloaded.ctx.model = h.ctx.model;
+    await emit(reloaded, "session_start", { reason: "reload" });
+    expect(await beforeProviderRequest(reloaded, { model: "gpt-5.5" })).toMatchObject({
+      service_tier: "default",
+    });
+    const separate = createHarness(cwd);
+    await emit(separate, "session_start");
+    expect(await beforeProviderRequest(separate, { model: "gpt-5.5" })).toMatchObject({
+      service_tier: "default",
+    });
+    expect(readRawConfig(configPaths(cwd).project)).toMatchObject({
+      serviceTier: "standard",
+      unknown: "keep",
+    });
+    expect(h.pi.appendEntry).toHaveBeenCalledTimes(2);
   });
 
   test.each([
@@ -297,7 +350,11 @@ describe("service tiers", () => {
         expect.stringContaining("6x Standard"),
         expect.anything(),
       );
-      expect(readRawConfig(configPaths(cwd).project).serviceTier).toBe("ultrafast");
+      expect(readRawConfig(configPaths(cwd).project).serviceTier).toBe("standard");
+      expect(h.pi.appendEntry).toHaveBeenLastCalledWith(
+        "pi-better-openai:service-tier",
+        "ultrafast",
+      );
       await emit(h, "session_start");
       expect(await beforeProviderRequest(h, { model: id })).toMatchObject({
         service_tier: "ultrafast",
@@ -372,6 +429,7 @@ describe("service tiers", () => {
       service_tier: "ultrafast",
     });
     expect(readRawConfig(configPaths(cwd).project).serviceTier).toBe("ultrafast");
+    expect(h.pi.appendEntry).not.toHaveBeenCalled();
   });
 
   test("nonpersistent selection stays session-only", async () => {
@@ -389,6 +447,9 @@ describe("service tiers", () => {
       service_tier: "priority",
     });
     expect(readRawConfig(configPaths(cwd).project).serviceTier).toBe("ultrafast");
+    expect(h.pi.appendEntry).not.toHaveBeenCalled();
+    await emit(h, "session_start", { reason: "reload" });
+    expect(await beforeProviderRequest(h, { model: "gpt-6-astra" })).toBeUndefined();
   });
 
   test("explicit tiers replace Ultrafast; invalid tiers do not change state", async () => {

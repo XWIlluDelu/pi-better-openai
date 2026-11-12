@@ -88,6 +88,7 @@ function createHarness(cwd: string): Harness {
     registerMessageRenderer: vi.fn(),
     registerShortcut: vi.fn(),
     sendMessage: vi.fn(),
+    appendEntry: vi.fn(),
     getFlag: vi.fn(() => false),
     getThinkingLevel: vi.fn(() => "off"),
   } as unknown as ExtensionAPI;
@@ -106,6 +107,7 @@ function createHarness(cwd: string): Harness {
       setWidget,
     },
     sessionManager: {
+      getBranch: vi.fn(() => []),
       getEntries,
       getLeafId,
       getCwd: vi.fn(() => cwd),
@@ -341,6 +343,37 @@ describe("footer mode ownership", () => {
     await emit(harness, "session_start");
 
     expect(harness.setFooter).not.toHaveBeenCalled();
+  });
+
+  test("RPC tier state follows the controller with the footer and persistence disabled", async () => {
+    const cwd = createTempProject();
+    writeProjectConfig(cwd, "off", { supportedModels: ["openai/gpt-5.5"] });
+    const harness = createHarness(cwd);
+    Object.assign(harness.ctx, {
+      mode: "rpc",
+      model: { provider: "openai", id: "gpt-5.5", api: "openai-responses" },
+    });
+    const state = () =>
+      JSON.parse(
+        harness.setStatus.mock.calls
+          .filter(([key]) => key === "better-openai:service-tier")
+          .at(-1)?.[1],
+      );
+    await emit(harness, "session_start");
+    expect(state()).toEqual({
+      tier: "standard",
+      active: false,
+      supported: { standard: true, fast: true, ultrafast: false },
+    });
+    await harness.commands.get("openai-tier")?.("fast", harness.ctx);
+    expect(state()).toMatchObject({ tier: "fast", active: true });
+    Object.assign(harness.ctx, { model: { provider: "other", id: "unsupported", api: "other" } });
+    await emit(harness, "model_select", { model: harness.ctx.model });
+    expect(state()).toMatchObject({
+      tier: "fast",
+      active: false,
+      supported: { standard: false, fast: false, ultrafast: false },
+    });
   });
 
   test("does not open the custom settings component in RPC mode", async () => {

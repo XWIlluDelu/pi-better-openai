@@ -183,7 +183,19 @@ For subscription OAuth, just run `/openai-tier ultrafast`. There is no additiona
 
 The footer shows `fast` or `ultrafast` only when supported by the current model. Diagnostics distinguish the requested tier and last injected payload from server-confirmed service or billing. **Pi's host cost estimates may omit the Ultrafast premium**; use OpenAI billing for actual charges. The host's native transport is preserved; WebSockets are recommended by OpenAI but HTTP is also supported. See [Ultrafast documentation](https://developers.openai.com/api/docs/guides/ultrafast-mode) and [pricing](https://developers.openai.com/api/docs/pricing?latest-pricing=ultrafast).
 
-`serviceTier` takes precedence over legacy `desiredActive`/`active` within each config layer; project state still overrides global state. `persistState: false` keeps tier changes session-only. `supportedModels` overrides the Fast allowlist, not Ultrafast capabilities. Unknown config fields and customized model lists are preserved.
+With `persistState: true` (the default), tier selections are saved in the current session, not the config file, and restored on resume and reload. The latest selection applies to the whole session; navigating history branches does not change it. Config supplies the default when the session has no saved selection. `serviceTier` takes precedence over legacy `desiredActive`/`active` within each config layer; project state still overrides global state. `persistState: false` keeps tier changes in memory only. `supportedModels` overrides the Fast allowlist, not Ultrafast capabilities. Unknown config fields and customized model lists are preserved.
+
+### RPC service-tier state
+
+RPC clients receive `better-openai:service-tier` through `ctx.ui.setStatus()`. Its JSON
+contains the requested `tier` (`standard`, `fast`, or `ultrafast`), `active` (whether
+the premium tier is active for this model), and a `supported` boolean for each tier.
+It is published at session startup, after tier selection, and when model capability changes,
+even when the footer is off or persistence is disabled. This reports the extension's requested
+state, not server-confirmed billing.
+
+RPC clients can send `/openai-tier <tier>` to change the selection. The extension owns tier
+persistence; clients do not need to parse human-readable footer text or save the tier separately.
 
 ## Typed decisions
 
